@@ -30,7 +30,7 @@ QUALITY_LEVELS = {'Standard': 26, 'High': 20, 'Maximum': 16}
 FORMATS = ('Portrait 9:16', 'Landscape 16:9', 'Free area')
 AUDIO_MODES = ('Computer sound', 'Microphone', 'Computer + microphone', 'No audio')
 APP_NAME = 'ClipForge'
-APP_VERSION = '1.2.3'
+APP_VERSION = '1.2.4'
 MIN_FREE_BYTES = 512 * 1024 * 1024
 
 
@@ -68,8 +68,9 @@ class RecordingHotkeys:
         user32 = ctypes.windll.user32
         registered = []
         try:
+            modifiers = 0x0001 | 0x0002 | 0x4000  # MOD_ALT | MOD_CONTROL | MOD_NOREPEAT
             for identifier, key in [(0x4341, 0x78), (0x4342, 0x79)]:
-                if user32.RegisterHotKey(None, identifier, 0x4006, key):
+                if user32.RegisterHotKey(None, identifier, modifiers, key):
                     registered.append(identifier)
             if len(registered) != 2:
                 self.events.put(('shortcut_warning', None))

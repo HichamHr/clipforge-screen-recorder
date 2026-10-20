@@ -11,6 +11,21 @@ import screen_recorder as app
 
 
 class ClipForgeTests(unittest.TestCase):
+    def test_global_shortcuts_use_control_alt_and_unregister(self):
+        hotkeys = app.RecordingHotkeys.__new__(app.RecordingHotkeys)
+        hotkeys.events = queue.Queue()
+        hotkeys.closed = threading.Event()
+        hotkeys.closed.set()
+        user32 = Mock()
+        user32.RegisterHotKey.return_value = 1
+        with patch.object(app.sys, 'platform', 'win32'), \
+                patch.object(app.ctypes, 'windll', SimpleNamespace(user32=user32)):
+            hotkeys.run()
+        self.assertEqual(user32.RegisterHotKey.call_args_list,
+                         [unittest.mock.call(None, 0x4341, 0x4003, 0x78),
+                          unittest.mock.call(None, 0x4342, 0x4003, 0x79)])
+        self.assertEqual(user32.UnregisterHotKey.call_count, 2)
+
     def test_crop_coordinates_include_scrolled_viewport(self):
         editor = SimpleNamespace(preview_bounds=(10, 20, 200, 400),
                                  canvas=SimpleNamespace(canvasx=lambda x: x+80,
