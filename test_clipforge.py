@@ -11,6 +11,18 @@ import screen_recorder as app
 
 
 class ClipForgeTests(unittest.TestCase):
+    def test_crop_coordinates_include_scrolled_viewport(self):
+        editor = SimpleNamespace(preview_bounds=(10, 20, 200, 400),
+                                 canvas=SimpleNamespace(canvasx=lambda x: x+80,
+                                                        canvasy=lambda y: y+120))
+        self.assertEqual(app.VideoLibrary.image_point(editor, 30, 40), (100, 140))
+        self.assertEqual(app.VideoLibrary.image_point(editor, 1000, 1000), (200, 400))
+
+    def test_snapshot_blocks_recording_until_capture_finishes(self):
+        recorder = SimpleNamespace(state='idle', preview_busy=True)
+        # No session or UI exists: start must return before touching either.
+        app.Recorder.start(recorder)
+
     def test_settings_round_trip_and_invalid_json(self):
         with tempfile.TemporaryDirectory(dir='.') as directory:
             path = Path(directory) / 'preferences' / 'settings.json'
@@ -54,7 +66,7 @@ class ClipForgeTests(unittest.TestCase):
                 kind, _, message = editor.events.get(timeout=5)
             self.assertEqual(kind, 'export_error')
             self.assertIn('cancelled', message)
-            self.assertEqual(list(Path(directory).glob('*_edit_*.mp4')), [])
+            self.assertEqual(set(Path(directory).glob('*.mp4')), {source})
             self.assertEqual(source.read_bytes(), b'original')
             process.kill.assert_called_once()
 

@@ -17,6 +17,10 @@ A local Windows desktop screen recorder built with Python and Tkinter. Record a 
 - Global shortcuts: **Ctrl+Alt+F9** starts recording; **Ctrl+Alt+F10** stops or cancels the countdown. Shortcut conflicts are reported in the status area.
 - Recording requires at least 512 MB free to start and requests an automatic stop below 128 MB. These guards do not guarantee enough space for final export.
 - Cancellable editor exports; completed outputs are preserved when cancelling a split.
+- Capture-area snapshot preview with a manual refresh and an upscaling notice.
+- A dedicated quality settings dialog with Apply/Cancel, a compact idle timer, and shared Start/Stop placement.
+- A scrollable settings column keeps labels and controls readable on short screens; use the mouse wheel, scrollbar, or Tab to reach settings.
+- Editor zoom (Fit, 100%, 150%, 200%), scrollbars, fullscreen (F11; Esc exits), a collapsible library, and an explicit Crop tool.
 
 ## Run from source
 
@@ -47,6 +51,10 @@ FFmpeg is provided by `imageio-ffmpeg`; a separate FFmpeg installation is not re
 
 In the area selector, drag to select an area, drag inside the selection to move it, press Enter to confirm, or Esc to cancel. Closing the app during recording requests a stop and save before exiting.
 
+Click **Quality settings…** to change resolution, frame rate, and quality. The home screen shows a compact summary. Changes take effect with **Apply settings**; Cancel leaves the previous values intact.
+
+Use **Refresh preview** to check the selected area before recording. ClipForge briefly hides its main window while taking the snapshot. The preview is a still image; refresh it after changing the screen contents. Changing the capture area or quality clears the snapshot. **More** contains floating controls, the recordings folder, and recovery.
+
 ## Build a portable EXE
 
 On a Windows computer with 64-bit Python installed, double-click **Build EXE.bat**. It creates `.build-venv`, installs build dependencies, and packages the app.
@@ -63,7 +71,9 @@ Test the built EXE on Windows, including screen capture, both audio sources, edi
 
 ## Editing and recovery
 
-The editor imports MP4, MKV, MOV, AVI, and WebM files. Set start/end times to trim, drag on the preview to crop, or position the slider to split into two videos. Exports preserve the original files. Preview playback is silent; exported audio is retained when available.
+The editor imports MP4, MKV, MOV, AVI, and WebM files. Set start/end times to trim, enable **Crop tool** and drag on the preview to crop, or position the slider to split into two videos. Use the zoom selector and scrollbars to inspect details, or collapse the library for a larger preview. Exports preserve the original files. Preview playback is silent; exported audio is retained when available.
+
+Edited files use the title `ClipForge_Cut` or `ClipForge_Reframe` for cropped exports, followed by a unique date/time stamp. Split exports also include `Part_01` and `Part_02`.
 
 If recording or saving fails, the app retains a `.recording_` folder and diagnostic log beside the output. Use **Recover recording…** and select the folder containing `video.mkv`. Audio recovery also needs the PCM files and `audio_ready.json`; choose **No audio** for video-only recovery. Keep recovery files until you have checked the recovered output.
 

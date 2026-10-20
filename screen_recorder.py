@@ -30,7 +30,7 @@ QUALITY_LEVELS = {'Standard': 26, 'High': 20, 'Maximum': 16}
 FORMATS = ('Portrait 9:16', 'Landscape 16:9', 'Free area')
 AUDIO_MODES = ('Computer sound', 'Microphone', 'Computer + microphone', 'No audio')
 APP_NAME = 'ClipForge'
-APP_VERSION = '1.1'
+APP_VERSION = '1.2.3'
 MIN_FREE_BYTES = 512 * 1024 * 1024
 
 
@@ -1054,6 +1054,7 @@ class VideoLibrary:
         outer = ttk.Frame(self.win, padding=18)
         outer.pack(fill='both', expand=True)
         sidebar = ttk.Frame(outer, width=230)
+        self.sidebar = sidebar
         sidebar.pack(side='left', fill='y', padx=(0, 18))
         ttk.Label(sidebar, text='Your videos', style='Title.TLabel').pack(anchor='w', pady=(0, 12))
         self.list = tk.Listbox(sidebar, bg=THEME['field'], fg=THEME['text'],
@@ -1066,10 +1067,35 @@ class VideoLibrary:
             ttk.Button(sidebar, text=label, command=callback, style='Ghost.TButton').pack(fill='x', pady=(8, 0))
         main = ttk.Frame(outer)
         main.pack(side='left', fill='both', expand=True)
+        tools = ttk.Frame(main)
+        tools.pack(fill='x', pady=(0, 10))
+        ttk.Button(tools, text='☰ Library', command=lambda: self.toggle_sidebar(main),
+                   style='Ghost.TButton').pack(side='left')
+        self.crop_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(tools, text='Crop tool', variable=self.crop_enabled,
+                        command=lambda: self.canvas.configure(cursor='crosshair' if self.crop_enabled.get() else 'arrow')).pack(side='left', padx=10)
+        self.zoom = tk.StringVar(value='Fit')
+        zoom_box = ttk.Combobox(tools, textvariable=self.zoom, values=('Fit', '100%', '150%', '200%'),
+                                width=7, state='readonly')
+        zoom_box.pack(side='left')
+        zoom_box.bind('<<ComboboxSelected>>', lambda e: self.request_frame())
+        ttk.Button(tools, text='Fullscreen', command=self.toggle_fullscreen,
+                   style='Ghost.TButton').pack(side='right')
+        self.win.bind('<F11>', lambda e: self.toggle_fullscreen())
+        self.win.bind('<Escape>', lambda e: self.win.attributes('-fullscreen', False))
         self.info = tk.StringVar(value='Choose or import a video')
         ttk.Label(main, textvariable=self.info, wraplength=650).pack(fill='x', pady=(0, 10))
-        self.canvas = tk.Canvas(main, bg='#050810', highlightthickness=1, highlightbackground=THEME['line'])
-        self.canvas.pack(fill='both', expand=True)
+        viewport = ttk.Frame(main)
+        viewport.pack(fill='both', expand=True)
+        viewport.columnconfigure(0, weight=1)
+        viewport.rowconfigure(0, weight=1)
+        self.canvas = tk.Canvas(viewport, bg='#050810', highlightthickness=1, highlightbackground=THEME['line'], height=260)
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        horizontal = ttk.Scrollbar(viewport, orient='horizontal', command=self.canvas.xview)
+        vertical = ttk.Scrollbar(viewport, orient='vertical', command=self.canvas.yview)
+        horizontal.grid(row=1, column=0, sticky='ew')
+        vertical.grid(row=0, column=1, sticky='ns')
+        self.canvas.configure(xscrollcommand=horizontal.set, yscrollcommand=vertical.set)
         self.canvas.bind('<ButtonPress-1>', self.crop_start)
         self.canvas.bind('<B1-Motion>', self.crop_drag)
         self.canvas.bind('<ButtonRelease-1>', self.crop_end)
@@ -1095,7 +1121,7 @@ class VideoLibrary:
             ttk.Entry(row, textvariable=var, width=9).pack(side='left', padx=(0, 12))
         ttk.Button(row, text='Set start here', command=lambda: self.start_time.set(f'{self.position.get():.3f}')).pack(side='left')
         ttk.Button(row, text='Set end here', command=lambda: self.end_time.set(f'{self.position.get():.3f}')).pack(side='left', padx=6)
-        ttk.Label(main, text='Drag on the preview to crop. Split uses the current slider position.').pack(anchor='w')
+        ttk.Label(main, text='Enable Crop tool to draw a crop. Zoom and scroll to inspect details.').pack(anchor='w')
         row = ttk.Frame(main)
         row.pack(fill='x', pady=12)
         for label, cb in [('Reset crop', self.reset_crop), ('Export trim / crop', lambda: self.export(False)),
@@ -1104,12 +1130,26 @@ class VideoLibrary:
         self.status = tk.StringVar(value='Original files are preserved. Preview updates when you seek.')
         self.cancel_button = ttk.Button(main, text='Cancel export', command=self.cancel_export,
                                         state='disabled', style='Ghost.TButton')
-        self.cancel_button.pack(anchor='w', pady=(0, 6))
         ttk.Label(main, textvariable=self.status, wraplength=650).pack(fill='x')
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         theme_titlebar(self.win)
         self.refresh()
         self.win.after(100, self.poll)
+
+    def toggle_sidebar(self, main):
+        if self.sidebar.winfo_manager():
+            self.sidebar.pack_forget()
+        else:
+            self.sidebar.pack(side='left', fill='y', padx=(0, 18), before=main)
+
+    def toggle_fullscreen(self):
+        self.win.attributes('-fullscreen', not self.win.attributes('-fullscreen'))
+
+    def preview_scale(self):
+        if self.zoom.get() != 'Fit':
+            return int(self.zoom.get().rstrip('%')) / 100
+        return min(max(2, self.canvas.winfo_width())/self.width,
+                   max(2, self.canvas.winfo_height())/self.height)
 
     def refresh(self):
         folder = Path(self.app.folder.get()).expanduser()
@@ -1203,8 +1243,7 @@ class VideoLibrary:
         token = self.token
         stop = self.play_stop = threading.Event()
         source = self.source
-        scale = min(max(2, self.canvas.winfo_width())/self.width,
-                    max(2, self.canvas.winfo_height())/self.height)
+        scale = self.preview_scale()
         w, h = max(2, int(self.width*scale)), max(2, int(self.height*scale))
         command = [self.exe, '-v', 'error', '-nostdin', '-ss', str(at), '-i', str(source),
                    '-an', '-vf', f'fps=12,scale={w}:{h}', '-f', 'rawvideo',
@@ -1261,7 +1300,7 @@ class VideoLibrary:
         at = min(self.position.get(), max(0, self.duration-.05))
         self.clock.set(f'{at:.2f}s / {self.duration:.2f}s')
         cw, ch = max(2, self.canvas.winfo_width()), max(2, self.canvas.winfo_height())
-        scale = min(cw/self.width, ch/self.height)
+        scale = self.preview_scale()
         w, h = max(2, int(self.width*scale)), max(2, int(self.height*scale))
         def worker():
             try:
@@ -1277,13 +1316,14 @@ class VideoLibrary:
 
     def crop_start(self, e):
         self.pause_preview()
-        if not self.photo or self.busy:
+        if not self.photo or self.busy or not self.crop_enabled.get():
             return
         self.anchor = self.image_point(e.x, e.y)
         self.crop = None
 
     def image_point(self, x, y):
         ox, oy, w, h = self.preview_bounds
+        x, y = self.canvas.canvasx(x), self.canvas.canvasy(y)
         return max(0, min(w, x-ox)), max(0, min(h, y-oy))
 
     def crop_drag(self, e):
@@ -1330,14 +1370,17 @@ class VideoLibrary:
             directory = filedialog.askdirectory(parent=self.win, title='Export videos to', initialdir=str(self.source.parent))
             if not directory:
                 return
-            stamp = dt.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-            jobs = [(Path(directory)/f'{self.source.stem}_edit_{stamp}_{i+1}.mp4', a, b) for i, (a, b) in enumerate(ranges)]
+            stamp = dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')
+            title = 'ClipForge_Reframe' if self.crop else 'ClipForge_Cut'
+            jobs = [(Path(directory)/(f'{title}_{stamp}' + (f'_Part_{i+1:02}' if split else '') + '.mp4'), a, b)
+                    for i, (a, b) in enumerate(ranges)]
             commands = [(p, clip_command(self.exe, self.source, p, a, b, self.crop)) for p, a, b in jobs]
         except Exception as exc:
             messagebox.showerror('Check edit settings', str(exc), parent=self.win)
             return
         self.busy = True
         self.export_cancel.clear()
+        self.cancel_button.pack(anchor='w', pady=(0, 6))
         self.cancel_button.configure(state='normal')
         self.status.set('Exporting… You can keep using the recorder.')
         def worker():
@@ -1404,7 +1447,8 @@ class VideoLibrary:
                 else:
                     data, w, h = payload
                 self.photo = tk.PhotoImage(data=data, format='PPM')
-                ox, oy = (self.canvas.winfo_width()-w)//2, (self.canvas.winfo_height()-h)//2
+                ox, oy = max(0, (self.canvas.winfo_width()-w)//2), max(0, (self.canvas.winfo_height()-h)//2)
+                self.canvas.configure(scrollregion=(0, 0, max(w, self.canvas.winfo_width()), max(h, self.canvas.winfo_height())))
                 self.preview_bounds = ox, oy, w, h
                 self.canvas.delete('all')
                 self.canvas.create_image(ox, oy, image=self.photo, anchor='nw')
@@ -1415,6 +1459,7 @@ class VideoLibrary:
                         outline=THEME['accent'], width=2, tags='crop')
             elif kind == 'exported':
                 self.busy = False
+                self.cancel_button.pack_forget()
                 self.cancel_button.configure(state='disabled')
                 self.paths = list(dict.fromkeys(payload+self.paths))
                 self.refresh()
@@ -1422,6 +1467,7 @@ class VideoLibrary:
             elif kind in ('error', 'export_error'):
                 if kind == 'export_error':
                     self.busy = False
+                    self.cancel_button.pack_forget()
                     self.cancel_button.configure(state='disabled')
                 self.status.set(payload)
         self.win.after(30, self.poll)
@@ -1447,6 +1493,8 @@ class Recorder:
         self.started = 0
         self.close_after_save = False
         self.overlay = None
+        self.preview_busy = False
+        self.preview_photo = None
         self.folder = tk.StringVar(value=str(Path.home()/'Videos'/'Screen Recordings'))
         self.mode = tk.StringVar(value=FORMATS[0])
         self.frame_rate = tk.StringVar(value='24')
@@ -1619,50 +1667,81 @@ class Recorder:
         ttk.Label(header, text=APP_NAME, style='Title.TLabel').grid(row=0, column=1, sticky='sw')
         ttk.Label(header, text='Your area. Your audio.  •  Custom quality  •  MP4',
                   style='Subtitle.TLabel').grid(row=1, column=1, sticky='nw')
+        header.columnconfigure(2, weight=1)
+        navigation = ttk.Frame(header)
+        navigation.grid(row=0, column=3, rowspan=2, sticky='e')
+        ttk.Label(navigation, text='Record', style='Subtitle.TLabel').pack(side='left', padx=px(12))
+        ttk.Button(navigation, text='Library & editor', command=self.open_editor,
+                   style='Ghost.TButton').pack(side='left')
+        self.tools_menu = tk.Menu(self.root, tearoff=False, bg=t['card'], fg=t['text'])
+        self.tools_menu.add_command(label='Show floating controls', command=self.restore_floating_bar)
+        self.tools_menu.add_command(label='Open recordings folder', command=self.open_folder)
+        self.tools_menu.add_command(label='Recover recording…', command=self.recover)
+        tools = ttk.Button(navigation, text='More ▾', style='Ghost.TButton')
+        tools.configure(command=lambda: self.tools_menu.tk_popup(tools.winfo_rootx(), tools.winfo_rooty()+tools.winfo_height()))
+        tools.pack(side='left', padx=(px(8), 0))
 
         body = ttk.Frame(outer)
         body.grid(row=1, column=0, sticky='nsew', pady=(px(20), px(12)))
-        body.columnconfigure(0, weight=11, uniform='main')
-        body.columnconfigure(1, weight=8, uniform='main')
+        body.columnconfigure(0, weight=9, uniform='main')
+        body.columnconfigure(1, weight=11, uniform='main')
         body.rowconfigure(0, weight=1)
 
-        # Left column: the three setup steps.
-        left = ttk.Frame(body)
-        left.grid(row=0, column=0, sticky='nsew', padx=(0, px(16)))
+        # A viewport keeps cards at their natural height on short/high-DPI screens.
+        settings_view = ttk.Frame(body)
+        settings_view.grid(row=0, column=0, sticky='nsew', padx=(0, px(16)))
+        settings_view.columnconfigure(0, weight=1)
+        settings_view.rowconfigure(0, weight=1)
+        self.settings_canvas = tk.Canvas(settings_view, bg=t['bg'], highlightthickness=0,
+                                         width=px(390), height=1, takefocus=True)
+        self.settings_canvas.grid(row=0, column=0, sticky='nsew')
+        scrollbar = ttk.Scrollbar(settings_view, orient='vertical', command=self.settings_canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky='ns', padx=(px(6), 0))
+        self.settings_canvas.configure(yscrollcommand=scrollbar.set)
+        left = self.settings_content = ttk.Frame(self.settings_canvas)
+        window = self.settings_canvas.create_window(0, 0, window=left, anchor='nw')
+        self.settings_canvas.bind('<Configure>', lambda e: self.settings_canvas.itemconfigure(window, width=e.width))
+        left.bind('<Configure>', lambda e: self.settings_canvas.configure(scrollregion=self.settings_canvas.bbox('all')))
+        def scroll_settings(event):
+            if str(event.widget).startswith(str(self.settings_canvas)) and not isinstance(event.widget, ttk.Combobox):
+                self.settings_canvas.yview_scroll(-int(event.delta/120), 'units')
+                return 'break'
+        self.root.bind('<MouseWheel>', scroll_settings, add='+')
+        self.settings_canvas.bind('<Next>', lambda e: self.settings_canvas.yview_scroll(1, 'pages'))
+        self.settings_canvas.bind('<Prior>', lambda e: self.settings_canvas.yview_scroll(-1, 'pages'))
+        def reveal_control(event):
+            widget = event.widget
+            if str(widget).startswith(str(left)):
+                self.root.after_idle(lambda: self.reveal_setting(widget))
+        self.root.bind('<FocusIn>', reveal_control, add='+')
         left.columnconfigure(0, weight=1)
-        for i in range(3):
-            left.rowconfigure(i, weight=1)
 
-        card, content = self.make_card(left, 1, 'Choose a format and recording area')
+        card, content = self.make_card(left, 1, 'Recording area')
         card.grid(row=0, column=0, sticky='nsew')
         row = ttk.Frame(content, style='Card.TFrame')
         row.pack(fill='x')
         self.format_box = ttk.Combobox(row, textvariable=self.mode, values=FORMATS, state='readonly', width=21)
-        self.format_box.pack(side='left', fill='x', expand=True)
+        self.format_box.pack(fill='x')
         self.format_box.bind('<<ComboboxSelected>>', self.format_changed)
-        self.area_btn = ttk.Button(row, text='Select area…', command=self.select_area, style='Accent.TButton')
-        self.area_btn.pack(side='left', padx=(px(8), px(6)))
-        self.reset_btn = ttk.Button(row, text='Reset', command=self.reset_area, style='Ghost.TButton')
+        area_actions = ttk.Frame(content, style='Card.TFrame')
+        area_actions.pack(fill='x', pady=(px(8), 0))
+        self.area_btn = ttk.Button(area_actions, text='Select area…', command=self.select_area, style='Accent.TButton')
+        self.area_btn.pack(side='left', fill='x', expand=True, padx=(0, px(8)))
+        self.reset_btn = ttk.Button(area_actions, text='Reset', command=self.reset_area, style='Ghost.TButton')
         self.reset_btn.pack(side='left')
         hint = ttk.Label(content, textvariable=self.area_text, style='Hint.TLabel', justify='left')
         hint.pack(anchor='w', pady=(px(10), 0))
         self.fit_text(content, hint)
 
         quality_row = ttk.Frame(content, style='Card.TFrame')
-        quality_row.pack(fill='x', pady=(px(10), 0))
-        self.quality_boxes = []
-        for column, (label, variable, values) in enumerate([
-                ('Resolution', self.resolution, RESOLUTIONS),
-                ('Frame rate (fps)', self.frame_rate, FRAME_RATES),
-                ('Quality', self.quality, tuple(QUALITY_LEVELS))]):
-            quality_row.columnconfigure(column, weight=1, uniform='quality')
-            ttk.Label(quality_row, text=label, style='Hint.TLabel').grid(
-                row=0, column=column, sticky='w', padx=(0, px(8)))
-            box = ttk.Combobox(quality_row, textvariable=variable, values=values,
-                               state='readonly', width=12)
-            box.grid(row=1, column=column, sticky='ew', padx=(0, px(8)))
-            box.bind('<<ComboboxSelected>>', lambda e: self.update_area())
-            self.quality_boxes.append(box)
+        quality_row.pack(fill='x', pady=(px(12), 0))
+        self.quality_summary = tk.StringVar()
+        summary = ttk.Label(quality_row, textvariable=self.quality_summary, style='Hint.TLabel')
+        summary.pack(fill='x', pady=(0, px(8)))
+        self.fit_text(quality_row, summary)
+        self.quality_button = ttk.Button(quality_row, text='Quality settings…', command=self.open_quality_settings,
+                                         style='Ghost.TButton')
+        self.quality_button.pack(fill='x')
 
         card, content = self.make_card(left, 2, 'Choose audio')
         card.grid(row=1, column=0, sticky='nsew', pady=(px(12), 0))
@@ -1684,9 +1763,9 @@ class Recorder:
         toggles = ttk.Frame(content, style='Card.TFrame')
         toggles.pack(fill='x', pady=(px(12), 0))
         self.options = []
-        for text, var in [('Show mouse pointer', self.mouse), ('Minimize when recording begins', self.minimize)]:
+        for text, var in [('Show mouse pointer', self.mouse), ('Minimize on start', self.minimize)]:
             c = ttk.Checkbutton(toggles, text=text, variable=var, style='Card.TCheckbutton')
-            c.pack(side='left', padx=(0, px(22)))
+            c.pack(anchor='w')
             self.options.append(c)
 
         # Right column: live state, timer and the record controls.
@@ -1697,8 +1776,7 @@ class Recorder:
         inner.pack(fill='both', expand=True)
         top = ttk.Frame(inner, style='Card.TFrame')
         top.pack(fill='x')
-        ttk.Label(top, text='4', style='Badge.TLabel', width=2, anchor='center').pack(side='left')
-        ttk.Label(top, text='Record', style='Heading.TLabel').pack(side='left', padx=(px(10), 0))
+        ttk.Label(top, text='Capture preview', style='Heading.TLabel').pack(side='left')
         live = ttk.Frame(top, style='Card.TFrame')
         live.pack(side='right')
         self.state_dot = tk.Canvas(live, width=px(12), height=px(12), bg=t['card'], highlightthickness=0)
@@ -1709,31 +1787,37 @@ class Recorder:
 
         bottom = ttk.Frame(inner, style='Card.TFrame')
         bottom.pack(side='bottom', fill='x')
-        tk.Frame(bottom, height=1, bg=t['line']).pack(fill='x', pady=(0, px(14)))
-        ttk.Button(bottom, text='Show floating controls', command=self.restore_floating_bar,
-                   style='Ghost.TButton').pack(fill='x', pady=(0, px(8)))
-        ttk.Button(bottom, text='Videos • Crop • Split', command=self.open_editor,
-                   style='Accent.TButton').pack(fill='x', pady=(0, px(8)))
-        ttk.Button(bottom, text='Open recordings folder', command=self.open_folder,
-                   style='Ghost.TButton').pack(fill='x')
+        # Recovery is available from More; keep the control for shared busy handling.
         self.recovery_btn = ttk.Button(bottom, text='Recover recording…', command=self.recover,
                                        style='Ghost.TButton')
-        self.recovery_btn.pack(fill='x', pady=(px(8), 0))
-
-        ttk.Label(inner, textvariable=self.clock, style='Time.TLabel', anchor='center').pack(
-            fill='x', pady=(px(22), px(4)))
-        status_box = ttk.Frame(inner, style='Card.TFrame', height=px(66))
+        self.timer_label = ttk.Label(bottom, textvariable=self.clock, style='Heading.TLabel', anchor='center')
+        self.timer_label.pack(fill='x', pady=(px(8), px(4)))
+        status_box = ttk.Frame(bottom, style='Card.TFrame', height=px(46))
         status_box.pack(fill='x')
         status_box.pack_propagate(False)
         status = ttk.Label(status_box, textvariable=self.status, style='Status.TLabel',
                            justify='center', anchor='center')
         status.pack(fill='both', expand=True)
         self.fit_text(status_box, status)
-        self.start_btn = ttk.Button(inner, text='●  Start recording', command=self.start, style='Record.TButton')
-        self.start_btn.pack(fill='x', pady=(px(14), px(8)))
-        self.stop_btn = ttk.Button(inner, text='■  Stop & save', command=self.stop, state='disabled',
+        self.action_slot = ttk.Frame(bottom, style='Card.TFrame')
+        self.action_slot.pack(fill='x', pady=(px(8), 0))
+        self.start_btn = ttk.Button(self.action_slot, text='●  Start recording', command=self.start, style='Record.TButton')
+        self.start_btn.pack(fill='x')
+        self.stop_btn = ttk.Button(self.action_slot, text='■  Stop & save', command=self.stop, state='disabled',
                                    style='Stop.TButton')
-        self.stop_btn.pack(fill='x')
+        preview_actions = ttk.Frame(inner, style='Card.TFrame')
+        preview_actions.pack(fill='x', pady=(px(12), px(8)))
+        self.preview_btn = ttk.Button(preview_actions, text='Refresh preview', command=self.refresh_preview,
+                                      style='Ghost.TButton')
+        self.preview_btn.pack(side='right')
+        ttk.Label(preview_actions, text='Snapshot • refresh to update', style='Hint.TLabel').pack(side='left')
+        self.preview_canvas = tk.Canvas(inner, bg='#050810', height=px(180), highlightthickness=0)
+        self.preview_canvas.pack(fill='both', expand=True)
+        self.preview_canvas.bind('<Configure>', lambda e: self.draw_preview())
+        self.preview_note = tk.StringVar(value='Select an area, then refresh the preview')
+        note = ttk.Label(inner, textvariable=self.preview_note, style='Hint.TLabel', justify='left')
+        note.pack(fill='x', pady=(px(8), 0))
+        self.fit_text(inner, note)
 
         # Footer: developer credit.
         footer = ttk.Frame(outer)
@@ -1761,10 +1845,91 @@ class Recorder:
             'saving': ('SAVING', t['warn']),
         }.get(self.state, ('READY', t['accent']))
         try:
+            busy = self.state != 'idle'
+            self.start_btn.pack_forget()
+            self.stop_btn.pack_forget()
+            if busy:
+                self.stop_btn.configure(text='Cancel countdown' if self.state == 'countdown' else
+                                        'Saving…' if self.state == 'saving' else '■  Stop & save')
+                self.stop_btn.pack(fill='x')
+            else:
+                self.start_btn.pack(fill='x')
+            self.timer_label.configure(style='Time.TLabel' if self.state == 'recording' else 'Heading.TLabel')
+            self.preview_btn.configure(state='disabled' if busy or self.preview_busy else 'normal')
             self.state_dot.itemconfigure(self.state_dot_item, fill=color)
             self.state_text.configure(text=text, foreground=color)
         except tk.TclError:
             pass
+
+    def reveal_setting(self, widget):
+        """Keep keyboard-focused settings visible in the scrolling column."""
+        if not widget.winfo_exists():
+            return
+        canvas = self.settings_canvas
+        top = widget.winfo_rooty()-self.settings_content.winfo_rooty()
+        bottom = top+widget.winfo_height()
+        visible_top = canvas.canvasy(0)
+        visible_bottom = visible_top+canvas.winfo_height()
+        total = max(1, self.settings_content.winfo_height())
+        if top < visible_top:
+            canvas.yview_moveto(max(0, top-self.px(8))/total)
+        elif bottom > visible_bottom:
+            canvas.yview_moveto((bottom-canvas.winfo_height()+self.px(8))/total)
+
+    def open_quality_settings(self):
+        if self.state != 'idle' or self.preview_busy:
+            return
+        existing = getattr(self, 'quality_dialog', None)
+        if existing and existing.winfo_exists():
+            existing.lift()
+            return
+        dialog = self.quality_dialog = tk.Toplevel(self.root)
+        dialog.title('ClipForge • Recording quality')
+        dialog.configure(bg=THEME['bg'])
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+        panel = ttk.Frame(dialog, padding=self.px(24))
+        panel.pack(fill='both', expand=True)
+        ttk.Label(panel, text='Recording quality', style='Heading.TLabel').grid(row=0, column=0, columnspan=2, sticky='w')
+        ttk.Label(panel, text='Choose your output size, smoothness and detail.',
+                  style='Subtitle.TLabel').grid(row=1, column=0, columnspan=2, sticky='w', pady=(self.px(6), self.px(20)))
+        drafts = []
+        first = None
+        for row, (label, variable, values) in enumerate([
+                ('Resolution', self.resolution, RESOLUTIONS),
+                ('Frame rate', self.frame_rate, FRAME_RATES),
+                ('Quality', self.quality, tuple(QUALITY_LEVELS))], start=2):
+            draft = tk.StringVar(dialog, value=variable.get())
+            drafts.append((variable, draft))
+            ttk.Label(panel, text=label).grid(row=row, column=0, sticky='w', padx=(0, self.px(24)), pady=self.px(8))
+            box = ttk.Combobox(panel, textvariable=draft, values=values, state='readonly', width=22)
+            box.grid(row=row, column=1, sticky='ew', pady=self.px(8))
+            first = first or box
+        ttk.Label(panel, text='Higher resolution and frame rate use more CPU.\nMaximum quality creates larger files.',
+                  style='Subtitle.TLabel').grid(row=5, column=0, columnspan=2, sticky='w', pady=(self.px(16), self.px(20)))
+        actions = ttk.Frame(panel)
+        actions.grid(row=6, column=0, columnspan=2, sticky='e')
+        def dismiss():
+            dialog.grab_release()
+            dialog.destroy()
+            self.quality_dialog = None
+        def apply(event=None):
+            for variable, draft in drafts:
+                variable.set(draft.get())
+            self.update_area()
+            self.remember_settings()
+            dismiss()
+        ttk.Button(actions, text='Cancel', command=dismiss, style='Ghost.TButton').pack(side='left', padx=(0, self.px(8)))
+        ttk.Button(actions, text='Apply settings', command=apply, style='Accent.TButton').pack(side='left')
+        dialog.protocol('WM_DELETE_WINDOW', dismiss)
+        dialog.bind('<Escape>', lambda e: dismiss())
+        dialog.bind('<Return>', apply)
+        dialog.update_idletasks()
+        x = max(0, self.root.winfo_rootx()+(self.root.winfo_width()-dialog.winfo_reqwidth())//2)
+        y = max(0, self.root.winfo_rooty()+(self.root.winfo_height()-dialog.winfo_reqheight())//2)
+        dialog.geometry(f'+{x}+{y}')
+        dialog.grab_set()
+        first.focus_set()
 
     def open_developer_site(self, event=None):
         try:
@@ -1794,10 +1959,56 @@ class Recorder:
     def update_area(self):
         x, y, w, h = self.region
         ow, oh = output_size(self.mode.get(), self.region, self.resolution.get())
-        self.area_text.set(f'Area: {w} × {h} at ({x}, {y})  →  Output: {ow} × {oh} • {self.frame_rate.get()} fps • {self.quality.get()}')
+        self.area_text.set(f'Area: {w} × {h} at ({x}, {y}) → Output: {ow} × {oh}')
+        self.quality_summary.set(f'{self.resolution.get()} • {self.frame_rate.get()} fps • {self.quality.get()}')
+        self.preview_photo = None
+        self.preview_note.set(f'{w} × {h} → {ow} × {oh}' +
+                              (' • Upscaled output: no additional source detail' if ow > w or oh > h else ''))
+        self.draw_preview()
+
+    def draw_preview(self):
+        canvas = self.preview_canvas
+        canvas.delete('all')
+        x, y = canvas.winfo_width()//2, canvas.winfo_height()//2
+        if self.preview_photo:
+            factor = max(1, math.ceil(max(self.preview_photo.width()/max(1, canvas.winfo_width()),
+                                          self.preview_photo.height()/max(1, canvas.winfo_height()))))
+            self.preview_display = self.preview_photo.subsample(factor) if factor > 1 else self.preview_photo
+            canvas.create_image(x, y, image=self.preview_display)
+        else:
+            canvas.create_text(x, y, text='Your capture area\n\nRefresh preview to check framing',
+                               fill=THEME['muted'], justify='center', font=('Segoe UI', 11))
+
+    def refresh_preview(self):
+        if self.state != 'idle' or self.preview_busy:
+            return
+        self.preview_busy = True
+        self.controls(True)
+        self.stop_btn.configure(state='disabled')
+        self.preview_btn.configure(state='disabled')
+        region = self.region
+        width, height = max(2, self.preview_canvas.winfo_width()), max(2, self.preview_canvas.winfo_height())
+        self.root.withdraw()
+        def capture():
+            try:
+                import imageio_ffmpeg
+                x, y, w, h = region
+                command = [imageio_ffmpeg.get_ffmpeg_exe(), '-v', 'error', '-nostdin',
+                           '-f', 'gdigrab', '-draw_mouse', '0', '-offset_x', str(x), '-offset_y', str(y),
+                           '-video_size', f'{w}x{h}', '-i', 'desktop', '-frames:v', '1',
+                           '-vf', f'scale={width}:{height}:force_original_aspect_ratio=decrease',
+                           '-f', 'image2pipe', '-vcodec', 'ppm', 'pipe:1']
+                result = subprocess.run(command, capture_output=True, timeout=10,
+                                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                if result.returncode or not result.stdout:
+                    raise RuntimeError('Could not capture preview. Select the area and try again.')
+                self.events.put(('capture_preview', result.stdout))
+            except Exception as exc:
+                self.events.put(('preview_error', str(exc)))
+        self.root.after(250, lambda: threading.Thread(target=capture, daemon=True).start())
 
     def select_area(self):
-        if self.state != 'idle':
+        if self.state != 'idle' or self.preview_busy:
             return
         self.hide_overlay()
         self.root.withdraw()
@@ -1856,14 +2067,14 @@ class Recorder:
             messagebox.showerror('Cannot open folder', str(exc))
 
     def controls(self, busy):
-        for w in [self.start_btn, self.browse, self.entry, self.area_btn, self.reset_btn, self.recovery_btn, *self.options]:
+        for w in [self.start_btn, self.browse, self.entry, self.area_btn, self.reset_btn, self.recovery_btn, self.quality_button, *self.options]:
             w.configure(state='disabled' if busy else 'normal')
-        for w in [self.format_box, self.audio_box, *self.quality_boxes]:
+        for w in [self.format_box, self.audio_box]:
             w.configure(state='disabled' if busy else 'readonly')
         self.stop_btn.configure(state='normal' if busy else 'disabled')
 
     def recover(self):
-        if self.state != 'idle':
+        if self.state != 'idle' or self.preview_busy:
             return
         directory = filedialog.askdirectory(title='Choose the .recording_ recovery folder containing video.mkv', initialdir=self.folder.get())
         if not directory:
@@ -1889,7 +2100,9 @@ class Recorder:
             messagebox.showerror('Cannot recover recording', str(exc), parent=self.root)
 
     def start(self):
-        if self.state != 'idle':
+        if self.state != 'idle' or self.preview_busy:
+            return
+        if getattr(self, 'quality_dialog', None):
             return
         try:
             if not self.folder.get().strip():
@@ -1968,7 +2181,20 @@ class Recorder:
                 kind, payload = self.events.get_nowait()
             except queue.Empty:
                 break
-            if kind == 'shortcut':
+            if kind in ('capture_preview', 'preview_error'):
+                self.preview_busy = False
+                self.controls(False)
+                self.root.deiconify()
+                self.root.lift()
+                if kind == 'capture_preview':
+                    self.preview_photo = tk.PhotoImage(data=payload, format='PPM')
+                    self.draw_preview()
+                    self.status.set('Preview updated • Ready to record')
+                else:
+                    self.status.set('Preview unavailable')
+                    messagebox.showerror('Preview unavailable', payload, parent=self.root)
+                self.preview_btn.configure(state='normal')
+            elif kind == 'shortcut':
                 self.start() if payload == 'start' else self.stop()
             elif kind == 'shortcut_warning':
                 self.status.set('Some global shortcuts are unavailable or already in use')
