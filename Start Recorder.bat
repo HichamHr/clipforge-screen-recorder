@@ -1,5 +1,6 @@
 @echo off
 setlocal
+title ClipForge
 cd /d "%~dp0"
 if exist ".venv\Scripts\python.exe" goto installed
 where py >nul 2>nul

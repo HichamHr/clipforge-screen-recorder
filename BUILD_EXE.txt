@@ -1,16 +1,16 @@
-CREATE A SINGLE WINDOWS EXECUTABLE — RECORDER v2.5
+CREATE A SINGLE WINDOWS EXECUTABLE — RECORDER v1.1
 
 Only YOU (the builder) need Python. People receiving the finished EXE do not
 need Python, pip, FFmpeg or any separate audio package installed.
 
 1. On a Windows 10/11 computer, install 64-bit Python 3.10 or newer.
    Keep pip and Tcl/Tk enabled. Python 3.12 or 3.13 is a straightforward choice.
-2. Extract the entire ScreenRecorder ZIP into a folder you can write to.
+2. Extract the entire ClipForge ZIP into a folder you can write to.
 3. Double-click Build EXE.bat. It creates a separate build environment,
    installs the pinned dependencies and runs PyInstaller.
 4. Wait for SUCCESS. The dist folder opens automatically.
-5. Test dist\ScreenRecorder.exe, including a short recording with audio.
-6. Send ScreenRecorder.exe to your users. They simply double-click it.
+5. Test dist\ClipForge.exe, including a short recording with audio.
+6. Send ClipForge.exe to your users. They simply double-click it.
 
 The EXE bundles Python, Tkinter, FFmpeg and PyAudioWPatch. It runs without
 network access; recording files are saved locally. A one-file application
@@ -28,7 +28,7 @@ Windows EXE when run on Linux/macOS. The supplied files were checked for syntax
 and worker-command behavior; native Windows packaging still requires a local
 build and recording test. This is not an installer and does not require admin.
 
-Build tool: PyInstaller 6.22.3. Build outputs: dist/, build/, ScreenRecorder.spec.
+Build tool: PyInstaller 6.22.3. Build outputs: dist/, build/, ClipForge.spec.
 The .build-venv folder is only for building and does not need to be shared.
 Keep the source and build files if you want to modify/rebuild the recorder.
 
@@ -37,6 +37,6 @@ https://pyinstaller.org/en/stable/operating-mode.html
 https://pyinstaller.org/en/stable/runtime-information.html
 https://pyinstaller.org/en/stable/usage.html
 
-After updating to v2.5, run Build EXE.bat again to include the live border,
+After updating to v1.1, run Build EXE.bat again to include the live border,
 floating controls, on-screen countdown and direct Start capture button.
 Previously built EXEs do not update when the Python source is replaced.

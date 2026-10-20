@@ -1,4 +1,4 @@
-# Screen Recorder
+# ClipForge
 
 A local Windows desktop screen recorder built with Python and Tkinter. Record a selected screen area with computer sound, microphone audio, or both, then trim, crop, or split videos in the built-in editor.
 
@@ -13,6 +13,10 @@ A local Windows desktop screen recorder built with Python and Tkinter. Record a 
 - Video library with import, seeking, silent playback preview, trimming, cropping, and splitting.
 - Diagnostic logs and recovery export for interrupted or failed saves.
 - Standalone Windows EXE packaging with PyInstaller.
+- Saved recording preferences in `%APPDATA%\ClipForge\settings.json`.
+- Global shortcuts: **Ctrl+Alt+F9** starts recording; **Ctrl+Alt+F10** stops or cancels the countdown. Shortcut conflicts are reported in the status area.
+- Recording requires at least 512 MB free to start and requests an automatic stop below 128 MB. These guards do not guarantee enough space for final export.
+- Cancellable editor exports; completed outputs are preserved when cancelling a split.
 
 ## Run from source
 
@@ -50,7 +54,7 @@ On a Windows computer with 64-bit Python installed, double-click **Build EXE.bat
 The result is:
 
 ```text
-dist/ScreenRecorder.exe
+dist/ClipForge.exe
 ```
 
 Recipients can run that file without installing Python or FFmpeg. This is a portable app, not an installer. The one-file executable extracts bundled components into a temporary directory on startup, which can add startup time.
@@ -66,7 +70,7 @@ If recording or saving fails, the app retains a `.recording_` folder and diagnos
 ## Current limitations
 
 - Windows desktop only; capture selection is limited to the primary monitor.
-- No recording pause/resume, global recording shortcuts, webcam overlay, or per-app audio filtering.
+- No recording pause/resume, webcam overlay, or per-app audio filtering.
 - Audio uses default Windows devices; device selection and volume mixing controls are not provided in the app.
 - Free-area capture fits a portrait or landscape output canvas and may add black bars. Small capture areas can be upscaled.
 - Capture uses CPU H.264 encoding. High resolutions and frame rates may exceed the computer's recording capacity.
@@ -86,8 +90,18 @@ For microphone access errors, allow desktop apps in Windows microphone privacy s
 | `requirements.txt` | Pinned runtime dependencies |
 | `Build EXE.bat` | Standalone Windows EXE build |
 | `build-requirements.txt` | Runtime dependencies plus PyInstaller |
-| `ScreenRecorder.spec` | PyInstaller specification; the build launcher regenerates it |
+| `ClipForge.spec` | PyInstaller specification; the build launcher regenerates it |
 | `BUILD_EXE.txt` | Detailed build instructions |
 | `READ_ME.txt` | Additional usage and troubleshooting notes |
 
 Developed by [hichamhr.com](https://hichamhr.com/).
+
+## Development checks
+
+Run the settings and export-cancellation checks without accessing recording hardware:
+
+```powershell
+.\.build-venv\Scripts\python.exe -m unittest -v test_clipforge
+```
+
+These checks do not replace a live recording, audio, shortcut, and UI check on Windows.

@@ -1,8 +1,17 @@
-SCREEN RECORDER v2.5 — LIVE AREA + CONTROLS — WINDOWS 10 / 11
+CLIPFORGE v1.1 — LIVE AREA + CONTROLS — WINDOWS 10 / 11
+
+CLIPFORGE IMPROVEMENTS
+- Ctrl+Alt+F9 starts recording globally; Ctrl+Alt+F10 stops or cancels countdown.
+  If another app owns either shortcut, the status area reports a conflict.
+- Recording preferences are saved to %APPDATA%\ClipForge\settings.json.
+- Start requires 512 MB free; below 128 MB during recording, capture stops to save.
+  More space may still be needed for the final MP4.
+- The video editor has a Cancel export button. Original videos and completed
+  split outputs are preserved; the active incomplete export is removed.
 
 MAKE AN EXE FOR USERS WITHOUT PYTHON
 Double-click Build EXE.bat on your Windows computer. When it finishes, share
-dist\ScreenRecorder.exe. Only the build computer needs Python and internet.
+dist\ClipForge.exe. Only the build computer needs Python and internet.
 See BUILD_EXE.txt for details.
 
 GET STARTED (RUNNING THE PYTHON SOURCE)
@@ -14,7 +23,7 @@ GET STARTED (RUNNING THE PYTHON SOURCE)
    If replacing the earlier version, replace all included files; the launcher
    installs the new audio component even if an old .venv already exists.
 
-LIVE CONTROLS (NEW IN v2.5)
+LIVE CONTROLS (NEW IN v1.1)
 - After selecting an area, its outline stays visible on your desktop.
 - Teal means ready; amber means countdown/opening/saving; red means recording.
 - The compact floating bar shows the timer, audio mode and REC / STOP.
@@ -120,9 +129,9 @@ Audio startup and saving have time limits; screen finalization is limited to
 in the recordings folder and the app displays an error.
 
 RECOVER A RECORDING THAT TIMED OUT DURING EXPORT
-1. Dismiss the old error and close the old recorder before starting v2.5.
+1. Dismiss the old error and close the old recorder before starting v1.1.
 2. Keep the .recording_ folder named in the error. Do not delete its files.
-3. Open v2.5 and click Recover recording.
+3. Open v1.1 and click Recover recording.
 4. Select that .recording_ folder INSIDE your recordings folder. It must
    contain video.mkv, plus .pcm audio and audio_ready.json for audio recovery.
 5. Recovery measures the video length and exports a new Recovered_*.mp4 next
@@ -135,7 +144,7 @@ video-only recovery. New recordings retain the sync metadata on failure.
 
 IF AN EARLIER VERSION IS STILL STUCK
 Close that old app using Windows Task Manager before launching this version.
-Replace all package files and check that the new title bar says v2.5. Existing
+Replace all package files and check that the new title bar says v1.1. Existing
 .recording_ folders from earlier failed saves are left untouched.
 Sources:
 https://ffmpeg.org/ffmpeg-devices.html#gdigrab

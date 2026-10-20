@@ -15,7 +15,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 
-# Build outputs (keep ScreenRecorder.spec tracked)
+# Build outputs (keep ClipForge.spec tracked)
 /build/
 /dist/
 

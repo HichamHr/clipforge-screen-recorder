@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-echo Screen Recorder - Build a standalone Windows EXE
+echo ClipForge - Build a standalone Windows EXE
 echo Only the build computer needs Python and internet.
 echo.
 if exist ".build-venv\Scripts\python.exe" goto dependencies
@@ -22,12 +22,12 @@ echo Installing build components...
 ".build-venv\Scripts\python.exe" -m pip install --only-binary=:all: -r build-requirements.txt
 if errorlevel 1 goto failed
 echo.
-echo Building ScreenRecorder.exe - this may take several minutes...
-".build-venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --noupx --name ScreenRecorder --collect-all imageio_ffmpeg --collect-all pyaudiowpatch --copy-metadata imageio-ffmpeg --copy-metadata PyAudioWPatch screen_recorder.py
+echo Building ClipForge.exe - this may take several minutes...
+".build-venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --noupx --name ClipForge --collect-all imageio_ffmpeg --collect-all pyaudiowpatch --copy-metadata imageio-ffmpeg --copy-metadata PyAudioWPatch screen_recorder.py
 if errorlevel 1 goto failed
-if not exist "dist\ScreenRecorder.exe" goto failed
+if not exist "dist\ClipForge.exe" goto failed
 echo.
-echo SUCCESS: dist\ScreenRecorder.exe
+echo SUCCESS: dist\ClipForge.exe
 echo Share that EXE. Recipients do not need Python or FFmpeg installed.
 echo Test recording, audio, saving and recovery on Windows before sharing.
 start "" explorer.exe "%CD%\dist"
@@ -41,7 +41,7 @@ exit /b 1
 :failed
 echo.
 echo Build failed. Read the error above; no working EXE has been confirmed.
-echo Close any running ScreenRecorder.exe before rebuilding.
+echo Close any running ClipForge.exe before rebuilding.
 echo Build on Windows using 64-bit Python with Tcl/Tk and pip enabled.
 pause
 exit /b 1

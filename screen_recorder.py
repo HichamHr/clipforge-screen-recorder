@@ -1,10 +1,11 @@
-"""Windows screen recorder v2. Launch with Start Recorder.bat.
+"""ClipForge desktop recorder. Launch with Start Recorder.bat.
 
 UI: Tkinter. Video: FFmpeg gdigrab. Audio: WASAPI via PyAudioWPatch.
 Dependencies are imported only when needed so geometry/encoding can be tested
 without Windows hardware. Audio and screen access need local Windows 10/11.
 """
 import ctypes
+from ctypes import wintypes
 import datetime as dt
 import os
 import json
@@ -28,6 +29,62 @@ RESOLUTIONS = ('720p', '1080p', '1440p', '2160p (4K)')
 QUALITY_LEVELS = {'Standard': 26, 'High': 20, 'Maximum': 16}
 FORMATS = ('Portrait 9:16', 'Landscape 16:9', 'Free area')
 AUDIO_MODES = ('Computer sound', 'Microphone', 'Computer + microphone', 'No audio')
+APP_NAME = 'ClipForge'
+APP_VERSION = '1.1'
+MIN_FREE_BYTES = 512 * 1024 * 1024
+
+
+def settings_path():
+    return Path(os.environ.get('APPDATA', str(Path.home()))) / APP_NAME / 'settings.json'
+
+
+def load_settings():
+    try:
+        data = json.loads(settings_path().read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data):
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    temporary.replace(path)
+
+
+class RecordingHotkeys:
+    """Own thread messages so Tk cannot consume global hotkey notifications."""
+    def __init__(self, events):
+        self.events = events
+        self.closed = threading.Event()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def run(self):
+        if sys.platform != 'win32':
+            return
+        user32 = ctypes.windll.user32
+        registered = []
+        try:
+            for identifier, key in [(0x4341, 0x78), (0x4342, 0x79)]:
+                if user32.RegisterHotKey(None, identifier, 0x4006, key):
+                    registered.append(identifier)
+            if len(registered) != 2:
+                self.events.put(('shortcut_warning', None))
+            message = wintypes.MSG()
+            while not self.closed.wait(.05):
+                while user32.PeekMessageW(ctypes.byref(message), None, 0x0312, 0x0312, 1):
+                    if message.wParam in registered:
+                        self.events.put(('shortcut', 'start' if message.wParam == 0x4341 else 'stop'))
+        finally:
+            for identifier in registered:
+                user32.UnregisterHotKey(None, identifier)
+
+    def close(self):
+        self.closed.set()
+        self.thread.join(timeout=1)
 
 # UI theme and credit link (display only).
 THEME = {
@@ -662,6 +719,9 @@ class RecordingSession:
                 while self.proc.poll() is None and not self.stop_event.wait(.1):
                     if self.audio_process:
                         self.audio_process.check()
+                    if shutil.disk_usage(self.target.parent).free < 128 * 1024 * 1024:
+                        self.events.put(('phase', 'Low disk space • stopping to save recording'))
+                        self.stop_event.set()
                 requested_stop = self.stop_event.is_set()
                 end = time.monotonic()
                 if self.proc.poll() is None:
@@ -971,7 +1031,7 @@ class VideoLibrary:
     def __init__(self, app):
         self.app = app
         self.win = tk.Toplevel(app.root)
-        self.win.title('Screen Recorder • Videos & editor')
+        self.win.title('ClipForge • Videos & editor')
         self.win.geometry('1100x740')
         self.win.minsize(850, 650)
         self.win.configure(bg=THEME['bg'])
@@ -981,6 +1041,7 @@ class VideoLibrary:
         self.crop = None
         self.busy = False
         self.process = None
+        self.export_cancel = threading.Event()
         self.closed = False
         self.token = 0
         self.photo = None
@@ -1041,6 +1102,9 @@ class VideoLibrary:
                           ('Split into 2 videos', lambda: self.export(True))]:
             ttk.Button(row, text=label, command=cb, style='Ghost.TButton').pack(side='left', padx=(0, 8))
         self.status = tk.StringVar(value='Original files are preserved. Preview updates when you seek.')
+        self.cancel_button = ttk.Button(main, text='Cancel export', command=self.cancel_export,
+                                        state='disabled', style='Ghost.TButton')
+        self.cancel_button.pack(anchor='w', pady=(0, 6))
         ttk.Label(main, textvariable=self.status, wraplength=650).pack(fill='x')
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         theme_titlebar(self.win)
@@ -1273,22 +1337,41 @@ class VideoLibrary:
             messagebox.showerror('Check edit settings', str(exc), parent=self.win)
             return
         self.busy = True
+        self.export_cancel.clear()
+        self.cancel_button.configure(state='normal')
         self.status.set('Exporting… You can keep using the recorder.')
         def worker():
             created = []
             try:
                 for path, command in commands:
-                    result = subprocess.run(command, capture_output=True,
-                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-                    if result.returncode:
+                    if self.export_cancel.is_set():
+                        raise RuntimeError('Export cancelled. Completed files are preserved.')
+                    with tempfile.TemporaryFile() as errors:
+                        result = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=errors,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                        self.process = result
+                        while result.poll() is None:
+                            if self.export_cancel.wait(.1):
+                                result.kill()
+                                result.wait()
+                                break
+                        errors.seek(0)
+                        details = errors.read()[-1800:].decode(errors='replace')
+                    if self.export_cancel.is_set() or result.returncode:
                         # Only our newly generated, incomplete export is removed.
                         path.unlink(missing_ok=True)
-                        raise RuntimeError(result.stderr.decode(errors='replace')[-1800:])
+                        raise RuntimeError('Export cancelled. Completed files are preserved.' if self.export_cancel.is_set() else details)
                     created.append(path)
                 self.events.put(('exported', None, created))
             except Exception as exc:
                 self.events.put(('export_error', None, str(exc)))
         threading.Thread(target=worker, daemon=True).start()
+
+    def cancel_export(self):
+        if self.busy:
+            self.export_cancel.set()
+            self.cancel_button.configure(state='disabled')
+            self.status.set('Cancelling export…')
 
     def poll(self):
         if self.closed:
@@ -1332,12 +1415,14 @@ class VideoLibrary:
                         outline=THEME['accent'], width=2, tags='crop')
             elif kind == 'exported':
                 self.busy = False
+                self.cancel_button.configure(state='disabled')
                 self.paths = list(dict.fromkeys(payload+self.paths))
                 self.refresh()
                 self.status.set('Saved: '+', '.join(p.name for p in payload))
             elif kind in ('error', 'export_error'):
                 if kind == 'export_error':
                     self.busy = False
+                    self.cancel_button.configure(state='disabled')
                 self.status.set(payload)
         self.win.after(30, self.poll)
 
@@ -1369,10 +1454,22 @@ class Recorder:
         self.quality = tk.StringVar(value='High')
         self.audio = tk.StringVar(value=AUDIO_MODES[0])
         self.mouse, self.minimize = tk.BooleanVar(value=True), tk.BooleanVar(value=True)
+        preferences = load_settings()
+        for key, variable, choices in [
+                ('mode', self.mode, FORMATS), ('frame_rate', self.frame_rate, FRAME_RATES),
+                ('resolution', self.resolution, RESOLUTIONS), ('quality', self.quality, QUALITY_LEVELS),
+                ('audio', self.audio, AUDIO_MODES)]:
+            if isinstance(preferences.get(key), str) and preferences[key] in choices:
+                variable.set(preferences[key])
+        if isinstance(preferences.get('folder'), str) and preferences['folder'].strip():
+            self.folder.set(preferences['folder'])
+        for key, variable in [('mouse', self.mouse), ('minimize', self.minimize)]:
+            if isinstance(preferences.get(key), bool):
+                variable.set(preferences[key])
         self.status = tk.StringVar(value='Choose your area, then press Start')
         self.clock = tk.StringVar(value='00:00:00')
         self.area_text = tk.StringVar()
-        root.title('Screen Recorder v1 • Record & edit')
+        root.title(f'{APP_NAME} {APP_VERSION} • Record & edit')
         self.ui_scale = max(1.0, root.winfo_fpixels('1i') / 96.0)
         root.configure(bg=THEME['bg'])
         self.build_styles()
@@ -1388,7 +1485,16 @@ class Recorder:
         theme_titlebar(root)
         self.reset_area()
         self.main_excluded = configure_overlay_window(root, tool_window=False)
+        self.hotkeys = RecordingHotkeys(self.events)
         root.after(100, self.poll)
+
+    def remember_settings(self):
+        try:
+            save_settings({key: getattr(self, key).get() for key in
+                           ('folder', 'mode', 'frame_rate', 'resolution', 'quality',
+                            'audio', 'mouse', 'minimize')})
+        except OSError:
+            pass
 
     def px(self, value):
         """Scale a design pixel to the Windows display scaling of this screen."""
@@ -1510,7 +1616,7 @@ class Recorder:
         rounded_polygon(logo, 1, 1, px(45), px(45), px(13), fill=t['accent_dim'], outline=t['accent'])
         logo.create_oval(px(12), px(12), px(34), px(34), outline=t['text'], width=2)
         logo.create_oval(px(18), px(18), px(28), px(28), fill=t['danger'], outline='')
-        ttk.Label(header, text='Screen Recorder', style='Title.TLabel').grid(row=0, column=1, sticky='sw')
+        ttk.Label(header, text=APP_NAME, style='Title.TLabel').grid(row=0, column=1, sticky='sw')
         ttk.Label(header, text='Your area. Your audio.  •  Custom quality  •  MP4',
                   style='Subtitle.TLabel').grid(row=1, column=1, sticky='nw')
 
@@ -1641,7 +1747,7 @@ class Recorder:
         link.bind('<Button-1>', self.open_developer_site)
         link.bind('<Enter>', lambda e: link.configure(font=(ui, 9, 'bold underline')))
         link.bind('<Leave>', lambda e: link.configure(font=(ui, 9, 'bold')))
-        ttk.Label(credit, text='v1.0', style='Footer.TLabel').pack(side='right')
+        ttk.Label(credit, text=f'Ctrl+Alt+F9: Start • Ctrl+Alt+F10: Stop   |   v{APP_VERSION}', style='Footer.TLabel').pack(side='right')
 
         self.status.trace_add('write', self.refresh_indicator)
         self.refresh_indicator()
@@ -1794,6 +1900,8 @@ class Recorder:
                 raise ValueError('The screen layout changed or the area is too small. Select your area again.')
             folder = Path(self.folder.get()).expanduser().resolve()
             folder.mkdir(parents=True, exist_ok=True)
+            if shutil.disk_usage(folder).free < MIN_FREE_BYTES:
+                raise ValueError('Less than 512 MB is available. Choose a folder with more free space.')
             self.folder.set(str(folder))
             target = folder/(dt.datetime.now().strftime('Recording_%Y-%m-%d_%H-%M-%S_%f')+'.mp4')
             with target.with_suffix('.check').open('x'):
@@ -1810,6 +1918,7 @@ class Recorder:
             messagebox.showerror('Cannot start', f'{exc}\n\nRun Start Recorder.bat to set up the required components.')
             return
         self.generation += 1
+        self.remember_settings()
         self.state = 'countdown'
         self.controls(True)
         self.clock.set('00:00:00')
@@ -1859,7 +1968,11 @@ class Recorder:
                 kind, payload = self.events.get_nowait()
             except queue.Empty:
                 break
-            if kind == 'started':
+            if kind == 'shortcut':
+                self.start() if payload == 'start' else self.stop()
+            elif kind == 'shortcut_warning':
+                self.status.set('Some global shortcuts are unavailable or already in use')
+            elif kind == 'started':
                 self.started = payload
                 if self.state != 'saving':
                     self.state = 'recording'
@@ -1915,6 +2028,8 @@ class Recorder:
             self.destroy()
 
     def destroy(self):
+        self.remember_settings()
+        self.hotkeys.close()
         if getattr(self, 'editor', None) and not self.editor.closed:
             self.editor.pause_preview()
             self.editor.closed = True
