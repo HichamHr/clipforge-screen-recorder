@@ -18,6 +18,7 @@ class Telemetry:
     def __init__(self, directory, version, endpoint='', enabled=False):
         self.version, self.endpoint = version, endpoint.rstrip('/')
         self.enabled = enabled
+        self.geo_enabled = False
         self.path = Path(directory) / 'outbox.sqlite3'
         self.lock = threading.RLock()
         self.stop = threading.Event()
@@ -89,6 +90,7 @@ class Telemetry:
             if not self.enabled or name not in EVENTS:
                 return False
             clean = {k: v for k, v in properties.items() if k in PROPERTIES and isinstance(v, (str, int, float, bool))}
+            clean['geo_consent'] = self.geo_enabled
             return self.enqueue('event', {'name': name, 'properties': clean})
 
     def feedback(self, category, message, email=''):
@@ -105,6 +107,10 @@ class Telemetry:
                 with self.lock, self.connect() as db:
                     db.execute('DELETE FROM outbox WHERE id=?', (identifier,))
                 continue
+            if kind == 'event':
+                payload = json.loads(body)
+                payload['properties']['geo_consent'] = payload['properties'].get('geo_consent') is True and self.geo_enabled
+                body = json.dumps(payload)
             request = urllib.request.Request(self.endpoint + '/v1/' + ('events' if kind == 'event' else 'feedback'),
                 data=body.encode(), headers={'Content-Type': 'application/json'}, method='POST')
             with urllib.request.urlopen(request, timeout=3) as response:

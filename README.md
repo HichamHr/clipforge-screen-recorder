@@ -14,6 +14,7 @@ A local Windows desktop screen recorder built with Python and Tkinter. Record a 
 - Diagnostic logs and recovery export for interrupted or failed saves.
 - Standalone Windows EXE packaging with PyInstaller.
 - Saved recording preferences in `%APPDATA%\ClipForge\settings.json`.
+- Optional approximate country/region sharing has its own Privacy setting. Existing users keep it off until enabled; the 1.4.0 first-launch prompt explicitly includes it in Allow. Deploy the website's advanced analytics migration before distributing 1.4.0.
 - A one-time first-launch prompt offers **Allow** or **No thanks** for usage statistics. Both answers are remembered; the choice can be changed in More → Privacy & usage statistics. Previously enabled sharing is preserved.
 - Global shortcuts: **Ctrl+Alt+F9** starts recording; **Ctrl+Alt+F10** stops or cancels the countdown. Shortcut conflicts are reported in the status area.
 - Recording requires at least 512 MB free to start and requests an automatic stop below 128 MB. These guards do not guarantee enough space for final export.

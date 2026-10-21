@@ -32,7 +32,7 @@ QUALITY_LEVELS = {'Standard': 26, 'High': 20, 'Maximum': 16}
 FORMATS = ('Portrait 9:16', 'Landscape 16:9', 'Free area')
 AUDIO_MODES = ('Computer sound', 'Microphone', 'Computer + microphone', 'No audio')
 APP_NAME = 'ClipForge'
-APP_VERSION = '1.3.3'
+APP_VERSION = '1.4.0'
 MIN_FREE_BYTES = 512 * 1024 * 1024
 
 
@@ -1538,10 +1538,12 @@ class Recorder:
         self.mouse, self.minimize = tk.BooleanVar(value=True), tk.BooleanVar(value=True)
         preferences = load_settings()
         self.share_usage = tk.BooleanVar(value=preferences.get('share_usage') is True)
+        self.geo_usage = tk.BooleanVar(value=preferences.get('geo_usage') is True)
         self.usage_choice_made = tk.BooleanVar(value=preferences.get('usage_choice_made') is True or self.share_usage.get())
         self.usage_prompt = None
         self.telemetry = Telemetry(settings_path().parent, APP_VERSION,
                                    os.environ.get('CLIPFORGE_API_URL', API_URL), self.share_usage.get())
+        self.telemetry.geo_enabled = self.geo_usage.get() and self.share_usage.get()
         self.telemetry.track('app_opened')
         for key, variable, choices in [
                 ('mode', self.mode, FORMATS), ('frame_rate', self.frame_rate, FRAME_RATES),
@@ -1581,7 +1583,7 @@ class Recorder:
         try:
             save_settings({key: getattr(self, key).get() for key in
                            ('folder', 'mode', 'frame_rate', 'resolution', 'quality',
-                            'audio', 'mouse', 'minimize', 'share_usage', 'usage_choice_made')})
+                            'audio', 'mouse', 'minimize', 'share_usage', 'usage_choice_made', 'geo_usage')})
         except OSError:
             pass
 
@@ -1975,8 +1977,11 @@ class Recorder:
         dialog.grab_set()
         first.focus_set()
 
-    def apply_usage_choice(self, enabled):
+    def apply_usage_choice(self, enabled, include_geo=None):
         previous = self.share_usage.get()
+        if include_geo is not None:
+            self.geo_usage.set(enabled and include_geo)
+            self.telemetry.geo_enabled = enabled and include_geo
         self.share_usage.set(enabled)
         self.usage_choice_made.set(True)
         if previous != enabled:
@@ -2000,7 +2005,9 @@ class Recorder:
         ttk.Label(panel, text='Would you like to share optional usage statistics?',
                   wraplength=self.px(370)).pack(anchor='w', pady=(self.px(12), self.px(8)))
         ttk.Label(panel, text='This includes app launches, recording duration, feature use and\n'
-                  'success/failure counts linked to a random installation ID.\n\n'
+                  'success/failure counts linked to a random installation ID.\n'
+                  'Allow also includes approximate country and region inferred\n'
+                  'from your connection, which can be inaccurate with a VPN.\n\n'
                   'Your recordings, screen contents, audio, filenames and paths\n'
                   'are never included. The receiving server sees your network IP.\n\n'
                   'You can change your choice anytime in More → Privacy & usage statistics.',
@@ -2008,7 +2015,7 @@ class Recorder:
         actions = ttk.Frame(panel)
         actions.pack(fill='x')
         def choose(enabled):
-            self.apply_usage_choice(enabled)
+            self.apply_usage_choice(enabled, include_geo=enabled)
             dialog.grab_release()
             dialog.destroy()
             self.usage_prompt = None
@@ -2037,16 +2044,20 @@ class Recorder:
                   'A random installation ID links statistics from this installation.\n'
                   'No recordings, screenshots, audio, filenames, paths or logs are sent.\n'
                   'The receiving server can see your network IP when you connect.\n\n'
+                  'If separately enabled below, country and region are inferred\n'
+                  'from the connection; no GPS or raw IP is stored in events.\n\n'
                   'Turning this off deletes queued usage events. A request already in\n'
                   'flight may finish. Feedback is sent only when you submit it.',
                   wraplength=self.px(400), justify='left').pack(anchor='w', pady=16)
         choice = tk.BooleanVar(dialog, value=self.share_usage.get())
         ttk.Checkbutton(panel, text='Share usage statistics (optional)', variable=choice).pack(anchor='w')
+        geography = tk.BooleanVar(dialog, value=self.geo_usage.get())
+        ttk.Checkbutton(panel, text='Include approximate country and region', variable=geography).pack(anchor='w')
         destination = self.telemetry.endpoint if self.telemetry.configured else 'Not configured — nothing can be uploaded yet'
         ttk.Label(panel, text='Destination: '+destination, wraplength=self.px(400),
                   style='Subtitle.TLabel').pack(anchor='w', pady=12)
         def save():
-            self.apply_usage_choice(choice.get())
+            self.apply_usage_choice(choice.get(), include_geo=geography.get())
             dialog.destroy()
         ttk.Button(panel, text='Save preference', command=save, style='Accent.TButton').pack(anchor='e')
 

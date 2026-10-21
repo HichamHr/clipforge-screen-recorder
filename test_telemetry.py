@@ -1,4 +1,5 @@
 import tempfile
+import json
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +7,22 @@ from clipforge_telemetry import Telemetry
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_geography_requires_opt_in_and_is_removed_before_send_after_opt_out(self):
+        with tempfile.TemporaryDirectory() as directory, patch('clipforge_telemetry.threading.Thread'):
+            client = Telemetry(directory, '1.4.0', 'http://localhost:3000/api', enabled=True)
+            client.geo_enabled = True
+            client.track('app_opened')
+            with client.connect() as db:
+                queued = json.loads(db.execute('select body from outbox').fetchone()[0])
+                self.assertTrue(queued['properties']['geo_consent'])
+            client.geo_enabled = False
+            response = MagicMock()
+            response.__enter__.return_value.status = 202
+            with patch('clipforge_telemetry.urllib.request.urlopen', return_value=response) as send:
+                client.flush()
+            self.assertFalse(json.loads(send.call_args.args[0].data)['properties']['geo_consent'])
+            client.close()
+
     def test_http_allowed_only_for_loopback(self):
         client = Telemetry.__new__(Telemetry)
         for endpoint in ('http://localhost:3000/api', 'http://127.0.0.1:3000/api',

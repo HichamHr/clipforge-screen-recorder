@@ -1,16 +1,15 @@
 # ClipForge data collector
 
-The desktop app posts explicit usage events and submitted feedback to your HTTPS API. The server stores them in SQLite. There is no direct database connection or administrator token inside the EXE. PostHog is optional later; this first version provides protected summary and feedback endpoints.
+The desktop app posts explicit usage events and submitted feedback to your HTTPS API. The server stores them in SQLite. There is no direct database connection or administrator token inside the EXE. The collector exposes the two submission endpoints used by the desktop app and a public health check for hosting.
 
 ## Deployment
 
 1. Choose a container host with persistent storage. A domain alone does not run the API.
 2. Build the Docker image using `server/` as the build context. Mount a persistent writable volume at `/data` (owned by the container's collector user). Back up this volume.
-3. Set `CLIPFORGE_ADMIN_TOKEN` to a long random secret in the host's environment configuration. Never put this token in the desktop app or commit it.
-4. Route HTTPS traffic to port 8000. Configure a custom domain such as `clipforge-api.hichamhr.com` using the DNS records provided by your host. The address is a suggestion, not an existing deployment.
-5. Add edge rate limits to POST `/v1/events` and `/v1/feedback`, for example 60 requests/minute/IP, and a 24 KB request limit. These endpoints are intentionally public; installation IDs are not authentication and submitted counts are untrusted. Do not use analytics counts for billing or licensing.
-6. Disable request-body logging and minimize IP retention in hosting/proxy logs. Set a read timeout and a connection limit at the proxy. The app restricts payload sizes and fields but does not provide distributed abuse protection.
-7. Set `API_URL` in `clipforge_config.py` to the HTTPS base URL, then rebuild ClipForge. Until then, no uploads occur. `CLIPFORGE_API_URL` can override the URL for testing on a machine.
+3. Route HTTPS traffic to port 8000. Configure a custom domain such as `clipforge-api.hichamhr.com` using the DNS records provided by your host. The address is a suggestion, not an existing deployment.
+4. Add edge rate limits to POST `/v1/events` and `/v1/feedback`, for example 60 requests/minute/IP, and a 24 KB request limit. These endpoints are intentionally public; installation IDs are not authentication and submitted counts are untrusted. Do not use analytics counts for billing or licensing.
+5. Disable request-body logging and minimize IP retention in hosting/proxy logs. Set a read timeout and a connection limit at the proxy. The app restricts payload sizes and fields but does not provide distributed abuse protection.
+6. Set `API_URL` in `clipforge_config.py` to the HTTPS base URL, then rebuild ClipForge. Until then, no uploads occur. `CLIPFORGE_API_URL` can override the URL for testing on a machine.
 
 For local server development:
 
@@ -24,13 +23,7 @@ The desktop client accepts HTTPS only. Use local API tests for development, or a
 
 ## Receive your data
 
-Use an API client with an `Authorization: Bearer YOUR_ADMIN_TOKEN` header:
-
-- `GET /admin/summary`: installation count, event counts, app-open seconds and successful recording seconds.
-- `GET /admin/feedback?limit=50`: latest feedback messages and optional reply email.
-- `GET /health`: public availability check.
-
-Keep the admin token in the API client's secret store or environment, not in URLs. Admin views require a token even when no token is configured on the server. Responses can contain private feedback; do not publish them.
+The desktop app submits data with `POST /v1/events` and `POST /v1/feedback`. There are no admin reporting endpoints. View collected data through private server-side access to the SQLite database; feedback may contain personal information and must not be published. Configure hosting health checks to request `GET /health`, which returns `{"status": "ok"}` when the server is running.
 
 Event IDs make retried submissions idempotent. The metrics count opted-in installations, not all users. App-open time is not active keyboard/mouse time. Recording duration excludes the save phase. Session heartbeats run about once a minute; shutdown is best effort and events can remain queued until a later launch.
 

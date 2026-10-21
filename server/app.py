@@ -1,7 +1,5 @@
 """ClipForge collector. Deploy behind HTTPS with a persistent data volume."""
-import json
 import os
-import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -9,7 +7,7 @@ from typing import Literal
 from uuid import UUID
 from contextlib import contextmanager
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -88,40 +86,6 @@ def event(data: Event):
 @app.post('/v1/feedback', status_code=202)
 def feedback(data: Feedback):
     return store('feedback', data)
-
-
-def admin(authorization):
-    token = os.environ.get('CLIPFORGE_ADMIN_TOKEN', '')
-    if not token or not secrets.compare_digest(authorization or '', 'Bearer '+token):
-        raise HTTPException(401, 'Unauthorized')
-
-
-@app.get('/admin/summary')
-def summary(authorization: str | None = Header(default=None)):
-    admin(authorization)
-    with database() as db:
-        rows = db.execute("SELECT body FROM submissions WHERE kind='event'").fetchall()
-    counts, installations, seconds, recording_seconds = {}, set(), 0, 0
-    for (body,) in rows:
-        item = json.loads(body)
-        name = item['name']
-        counts[name] = counts.get(name, 0)+1
-        installations.add(item['installation'])
-        if name == 'session_time':
-            seconds += item['properties'].get('seconds') or 0
-        if name == 'recording_finished':
-            recording_seconds += item['properties'].get('seconds') or 0
-    return {'installations': len(installations), 'events': counts,
-            'app_open_seconds': seconds, 'successful_recording_seconds': recording_seconds}
-
-
-@app.get('/admin/feedback')
-def feedback_list(authorization: str | None = Header(default=None), limit: int = 50):
-    admin(authorization)
-    with database() as db:
-        rows = db.execute("SELECT body FROM submissions WHERE kind='feedback' ORDER BY received DESC LIMIT ?",
-                          (max(1, min(limit, 100)),)).fetchall()
-    return [json.loads(body) for (body,) in rows]
 
 
 @app.get('/health')
