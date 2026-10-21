@@ -22,6 +22,8 @@ import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import webbrowser
+from clipforge_telemetry import Telemetry
+from clipforge_config import API_URL
 
 FPS = 24
 FRAME_RATES = ('24', '30', '60')
@@ -30,7 +32,7 @@ QUALITY_LEVELS = {'Standard': 26, 'High': 20, 'Maximum': 16}
 FORMATS = ('Portrait 9:16', 'Landscape 16:9', 'Free area')
 AUDIO_MODES = ('Computer sound', 'Microphone', 'Computer + microphone', 'No audio')
 APP_NAME = 'ClipForge'
-APP_VERSION = '1.2.4'
+APP_VERSION = '1.3.3'
 MIN_FREE_BYTES = 512 * 1024 * 1024
 
 
@@ -864,6 +866,9 @@ class AreaSelector:
         self.start_button = tk.Button(footer, text='● Start capture', command=lambda: self.confirm(start_now=True), state='disabled', bg='#f04452', fg='white', activebackground='#dd3344', relief='flat', padx=14, pady=8,
             activeforeground='white', disabledforeground='#ffd0d4', bd=0, highlightthickness=0, cursor='hand2', font=('Segoe UI', 10, 'bold'))
         self.start_button.pack(side='left', padx=4)
+        tk.Button(footer, text='Center area', command=self.center_area, relief='flat', padx=14, pady=8,
+            bg=THEME['field'], fg=THEME['text'], activebackground=THEME['field_hover'],
+            activeforeground=THEME['text'], bd=0, cursor='hand2', font=('Segoe UI', 10, 'bold')).pack(side='left', padx=4)
         tk.Button(footer, text='Cancel', command=lambda: self.finish(None), relief='flat', padx=14, pady=8,
             bg=THEME['field'], fg=THEME['text'], activebackground=THEME['field_hover'],
             activeforeground=THEME['text'], bd=0, highlightthickness=0, cursor='hand2', font=('Segoe UI', 10, 'bold')).pack(side='left', padx=4)
@@ -871,8 +876,14 @@ class AreaSelector:
         self.win.bind('<Return>', self.confirm)
         self.win.bind('<Escape>', lambda e: self.finish(None))
         self.win.protocol('WM_DELETE_WINDOW', lambda: self.finish(None))
+        self.center_area()
         self.win.grab_set()
         self.win.focus_force()
+
+    def center_area(self):
+        self.region = centered_region(self.bounds, self.mode)
+        self.anchor = self.move_origin = None
+        self.draw_selection()
 
     def press(self, e):
         self.anchor = (e.x, e.y)
@@ -897,6 +908,9 @@ class AreaSelector:
             self.region = (x, y, w, h)
         else:
             self.region = dragged_region(self.anchor, (e.x, e.y), self.bounds, aspect_units(self.mode))
+        self.draw_selection()
+
+    def draw_selection(self):
         self.canvas.delete('selection')
         x, y, w, h = self.region
         valid = 'normal' if min(w, h) >= 32 else 'disabled'
@@ -1058,6 +1072,7 @@ class VideoLibrary:
         self.sidebar = sidebar
         sidebar.pack(side='left', fill='y', padx=(0, 18))
         ttk.Label(sidebar, text='Your videos', style='Title.TLabel').pack(anchor='w', pady=(0, 12))
+        ttk.Label(sidebar, text='Created date • Newest first', style='Subtitle.TLabel').pack(anchor='w', pady=(0, 8))
         self.list = tk.Listbox(sidebar, bg=THEME['field'], fg=THEME['text'],
             selectbackground=THEME['accent_dim'], selectforeground=THEME['accent'],
             highlightthickness=0, relief='flat', width=28, exportselection=False)
@@ -1154,11 +1169,25 @@ class VideoLibrary:
 
     def refresh(self):
         folder = Path(self.app.folder.get()).expanduser()
-        files = sorted((p for p in folder.glob('*') if p.suffix.lower() in ('.mp4', '.mkv', '.mov', '.avi', '.webm')), key=lambda p: p.stat().st_mtime, reverse=True)
-        self.paths = list(dict.fromkeys(files + self.paths))
+        files = [p for p in folder.glob('*') if p.suffix.lower() in ('.mp4', '.mkv', '.mov', '.avi', '.webm')]
+        entries = []
+        for path in dict.fromkeys(files + self.paths):
+            try:
+                if path.is_file():
+                    info = path.stat()
+                    created = getattr(info, 'st_birthtime_ns', info.st_ctime_ns)
+                    entries.append((created, str(path).casefold(), path))
+            except OSError:
+                continue  # Deleted or disconnected imports should not break refresh.
+        self.paths = [path for _, _, path in sorted(entries, reverse=True)]
         self.list.delete(0, 'end')
-        for p in self.paths:
-            self.list.insert('end', p.name)
+        for created, _, path in sorted(entries, reverse=True):
+            stamp = dt.datetime.fromtimestamp(created / 1_000_000_000).strftime('%d %b %H:%M')
+            self.list.insert('end', f'{stamp}  •  {path.name}')
+        if self.source in self.paths:
+            index = self.paths.index(self.source)
+            self.list.selection_set(index)
+        self.list.yview_moveto(0)
 
     def import_video(self):
         path = filedialog.askopenfilename(parent=self.win, filetypes=[('Videos', '*.mp4 *.mkv *.mov *.avi *.webm')])
@@ -1380,6 +1409,7 @@ class VideoLibrary:
             messagebox.showerror('Check edit settings', str(exc), parent=self.win)
             return
         self.busy = True
+        self.export_operation = 'split' if split else 'crop' if self.crop else 'trim'
         self.export_cancel.clear()
         self.cancel_button.pack(anchor='w', pady=(0, 6))
         self.cancel_button.configure(state='normal')
@@ -1459,6 +1489,7 @@ class VideoLibrary:
                         ox+(x+cw)*w/self.width, oy+(y+ch)*h/self.height,
                         outline=THEME['accent'], width=2, tags='crop')
             elif kind == 'exported':
+                self.app.telemetry.track('export_finished', operation=self.export_operation, parts=len(payload))
                 self.busy = False
                 self.cancel_button.pack_forget()
                 self.cancel_button.configure(state='disabled')
@@ -1467,6 +1498,7 @@ class VideoLibrary:
                 self.status.set('Saved: '+', '.join(p.name for p in payload))
             elif kind in ('error', 'export_error'):
                 if kind == 'export_error':
+                    self.app.telemetry.track('export_failed', operation=self.export_operation)
                     self.busy = False
                     self.cancel_button.pack_forget()
                     self.cancel_button.configure(state='disabled')
@@ -1492,6 +1524,7 @@ class Recorder:
         self.generation = 0
         self.region = None
         self.started = 0
+        self.recording_seconds = 0
         self.close_after_save = False
         self.overlay = None
         self.preview_busy = False
@@ -1504,6 +1537,12 @@ class Recorder:
         self.audio = tk.StringVar(value=AUDIO_MODES[0])
         self.mouse, self.minimize = tk.BooleanVar(value=True), tk.BooleanVar(value=True)
         preferences = load_settings()
+        self.share_usage = tk.BooleanVar(value=preferences.get('share_usage') is True)
+        self.usage_choice_made = tk.BooleanVar(value=preferences.get('usage_choice_made') is True or self.share_usage.get())
+        self.usage_prompt = None
+        self.telemetry = Telemetry(settings_path().parent, APP_VERSION,
+                                   os.environ.get('CLIPFORGE_API_URL', API_URL), self.share_usage.get())
+        self.telemetry.track('app_opened')
         for key, variable, choices in [
                 ('mode', self.mode, FORMATS), ('frame_rate', self.frame_rate, FRAME_RATES),
                 ('resolution', self.resolution, RESOLUTIONS), ('quality', self.quality, QUALITY_LEVELS),
@@ -1536,12 +1575,13 @@ class Recorder:
         self.main_excluded = configure_overlay_window(root, tool_window=False)
         self.hotkeys = RecordingHotkeys(self.events)
         root.after(100, self.poll)
+        root.after(500, self.prompt_usage)
 
     def remember_settings(self):
         try:
             save_settings({key: getattr(self, key).get() for key in
                            ('folder', 'mode', 'frame_rate', 'resolution', 'quality',
-                            'audio', 'mouse', 'minimize')})
+                            'audio', 'mouse', 'minimize', 'share_usage', 'usage_choice_made')})
         except OSError:
             pass
 
@@ -1678,6 +1718,9 @@ class Recorder:
         self.tools_menu.add_command(label='Show floating controls', command=self.restore_floating_bar)
         self.tools_menu.add_command(label='Open recordings folder', command=self.open_folder)
         self.tools_menu.add_command(label='Recover recording…', command=self.recover)
+        self.tools_menu.add_separator()
+        self.tools_menu.add_command(label='Privacy & usage statistics…', command=self.open_privacy)
+        self.tools_menu.add_command(label='Send feedback…', command=self.open_feedback)
         tools = ttk.Button(navigation, text='More ▾', style='Ghost.TButton')
         tools.configure(command=lambda: self.tools_menu.tk_popup(tools.winfo_rootx(), tools.winfo_rooty()+tools.winfo_height()))
         tools.pack(side='left', padx=(px(8), 0))
@@ -1932,6 +1975,130 @@ class Recorder:
         dialog.grab_set()
         first.focus_set()
 
+    def apply_usage_choice(self, enabled):
+        previous = self.share_usage.get()
+        self.share_usage.set(enabled)
+        self.usage_choice_made.set(True)
+        if previous != enabled:
+            self.telemetry.set_enabled(enabled)
+        self.remember_settings()
+
+    def prompt_usage(self):
+        if self.usage_choice_made.get() or self.state == 'closed':
+            return
+        if self.state != 'idle' or self.preview_busy or getattr(self, 'quality_dialog', None):
+            self.root.after(1000, self.prompt_usage)
+            return
+        dialog = self.usage_prompt = tk.Toplevel(self.root)
+        dialog.title('Help improve ClipForge')
+        dialog.configure(bg=THEME['bg'])
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+        panel = ttk.Frame(dialog, padding=self.px(24))
+        panel.pack(fill='both', expand=True)
+        ttk.Label(panel, text='Make ClipForge better, together.', style='Heading.TLabel').pack(anchor='w')
+        ttk.Label(panel, text='Would you like to share optional usage statistics?',
+                  wraplength=self.px(370)).pack(anchor='w', pady=(self.px(12), self.px(8)))
+        ttk.Label(panel, text='This includes app launches, recording duration, feature use and\n'
+                  'success/failure counts linked to a random installation ID.\n\n'
+                  'Your recordings, screen contents, audio, filenames and paths\n'
+                  'are never included. The receiving server sees your network IP.\n\n'
+                  'You can change your choice anytime in More → Privacy & usage statistics.',
+                  wraplength=self.px(370), justify='left', style='Subtitle.TLabel').pack(anchor='w', pady=(0, self.px(20)))
+        actions = ttk.Frame(panel)
+        actions.pack(fill='x')
+        def choose(enabled):
+            self.apply_usage_choice(enabled)
+            dialog.grab_release()
+            dialog.destroy()
+            self.usage_prompt = None
+        decline = ttk.Button(actions, text='No thanks', command=lambda: choose(False), style='Ghost.TButton')
+        decline.pack(side='left')
+        ttk.Button(actions, text='Allow', command=lambda: choose(True), style='Accent.TButton').pack(side='right')
+        dialog.protocol('WM_DELETE_WINDOW', lambda: choose(False))
+        dialog.bind('<Escape>', lambda e: choose(False))
+        dialog.update_idletasks()
+        x = max(0, self.root.winfo_rootx()+(self.root.winfo_width()-dialog.winfo_reqwidth())//2)
+        y = max(0, self.root.winfo_rooty()+(self.root.winfo_height()-dialog.winfo_reqheight())//2)
+        dialog.geometry(f'+{x}+{y}')
+        dialog.grab_set()
+        decline.focus_set()
+
+    def open_privacy(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title('ClipForge • Privacy')
+        dialog.configure(bg=THEME['bg'])
+        dialog.transient(self.root)
+        panel = ttk.Frame(dialog, padding=24)
+        panel.pack(fill='both', expand=True)
+        ttk.Label(panel, text='Help improve ClipForge', style='Heading.TLabel').pack(anchor='w')
+        ttk.Label(panel, text='Optional statistics include launches, app-open time, recording duration,\n'
+                  'feature counts, quality choices and success/failure counts.\n\n'
+                  'A random installation ID links statistics from this installation.\n'
+                  'No recordings, screenshots, audio, filenames, paths or logs are sent.\n'
+                  'The receiving server can see your network IP when you connect.\n\n'
+                  'Turning this off deletes queued usage events. A request already in\n'
+                  'flight may finish. Feedback is sent only when you submit it.',
+                  wraplength=self.px(400), justify='left').pack(anchor='w', pady=16)
+        choice = tk.BooleanVar(dialog, value=self.share_usage.get())
+        ttk.Checkbutton(panel, text='Share usage statistics (optional)', variable=choice).pack(anchor='w')
+        destination = self.telemetry.endpoint if self.telemetry.configured else 'Not configured — nothing can be uploaded yet'
+        ttk.Label(panel, text='Destination: '+destination, wraplength=self.px(400),
+                  style='Subtitle.TLabel').pack(anchor='w', pady=12)
+        def save():
+            self.apply_usage_choice(choice.get())
+            dialog.destroy()
+        ttk.Button(panel, text='Save preference', command=save, style='Accent.TButton').pack(anchor='e')
+
+    def open_feedback(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title('ClipForge • Feedback')
+        dialog.configure(bg=THEME['bg'])
+        dialog.transient(self.root)
+        panel = ttk.Frame(dialog, padding=24)
+        panel.pack(fill='both', expand=True)
+        ttk.Label(panel, text='Tell us what could be better', style='Heading.TLabel').pack(anchor='w')
+        category = tk.StringVar(dialog, value='Suggestion')
+        ttk.Combobox(panel, textvariable=category, values=('Suggestion', 'Bug', 'Other'), state='readonly').pack(fill='x', pady=12)
+        message = tk.Text(panel, width=48, height=8, bg=THEME['field'], fg=THEME['text'], insertbackground=THEME['text'], wrap='word')
+        message.pack(fill='both', expand=True)
+        ttk.Label(panel, text='Email for a reply (optional)').pack(anchor='w', pady=(12, 4))
+        email = ttk.Entry(panel)
+        email.pack(fill='x')
+        ttk.Label(panel, text='Only this message, category, optional email and app version are included.\n'
+                  'Sending queues feedback locally and retries when online.\n'
+                  'Avoid passwords or private recording details.', wraplength=self.px(420),
+                  style='Subtitle.TLabel').pack(anchor='w', pady=12)
+        def values():
+            text = message.get('1.0', 'end').strip()
+            address = email.get().strip()
+            if not 1 <= len(text) <= 4000 or len(address) > 254:
+                messagebox.showerror('Check feedback', 'Enter 1–4000 characters; email must be at most 254 characters.', parent=dialog)
+                return None
+            return {'category': category.get(), 'message': text, 'email': address}
+        def send():
+            data = values()
+            if data and self.telemetry.feedback(**data):
+                messagebox.showinfo('Feedback queued', 'Feedback is saved locally for delivery. It has not been confirmed received yet.', parent=dialog)
+                dialog.destroy()
+            elif data:
+                messagebox.showinfo('Sending unavailable', 'The feedback server is not configured or local storage is unavailable. Use Save to file instead.', parent=dialog)
+        def save_file():
+            data = values()
+            if not data:
+                return
+            path = filedialog.asksaveasfilename(parent=dialog, defaultextension='.json', initialfile='ClipForge_Feedback.json')
+            if path:
+                try:
+                    Path(path).write_text(json.dumps({'version': APP_VERSION, **data}, indent=2), encoding='utf-8')
+                    messagebox.showinfo('Feedback saved', 'The file is saved. Share it with the developer when convenient.', parent=dialog)
+                except OSError as exc:
+                    messagebox.showerror('Could not save feedback', str(exc), parent=dialog)
+        actions = ttk.Frame(panel)
+        actions.pack(fill='x')
+        ttk.Button(actions, text='Save to file', command=save_file, style='Ghost.TButton').pack(side='left')
+        ttk.Button(actions, text='Send feedback', command=send, style='Accent.TButton').pack(side='right')
+
     def open_developer_site(self, event=None):
         try:
             webbrowser.open(DEVELOPER_URL)
@@ -1939,6 +2106,7 @@ class Recorder:
             messagebox.showerror('Cannot open link', str(exc), parent=self.root)
 
     def open_editor(self):
+        self.telemetry.track('editor_opened')
         try:
             if getattr(self, 'editor', None) and not self.editor.closed:
                 self.editor.win.lift()
@@ -2105,6 +2273,8 @@ class Recorder:
             return
         if getattr(self, 'quality_dialog', None):
             return
+        if getattr(self, 'usage_prompt', None):
+            return
         try:
             if not self.folder.get().strip():
                 raise ValueError('Please choose a save folder.')
@@ -2133,6 +2303,8 @@ class Recorder:
             return
         self.generation += 1
         self.remember_settings()
+        self.started = 0
+        self.recording_seconds = 0
         self.state = 'countdown'
         self.controls(True)
         self.clock.set('00:00:00')
@@ -2201,6 +2373,8 @@ class Recorder:
                 self.status.set('Some global shortcuts are unavailable or already in use')
             elif kind == 'started':
                 self.started = payload
+                self.telemetry.track('recording_started', resolution=self.resolution.get(), fps=int(self.frame_rate.get()),
+                                     quality=self.quality.get(), audio=self.audio.get())
                 if self.state != 'saving':
                     self.state = 'recording'
                     self.status.set('Recording • Use the floating STOP button or Stop & save here')
@@ -2208,10 +2382,14 @@ class Recorder:
                 suffix = ' Closing when finished; click × again for exit options.' if self.close_after_save else ''
                 self.status.set(payload+suffix)
             elif kind == 'saving':
+                self.recording_seconds = max(0, round(time.monotonic()-self.started)) if self.started else 0
                 self.state = 'saving'
                 self.stop_btn.configure(state='disabled')
                 self.status.set('Saving before closing… Click × again for exit options.' if self.close_after_save else 'Saving video and audio… Please wait.')
             elif kind in ('success', 'error'):
+                if not isinstance(self.session, RecoverySession):
+                    self.telemetry.track('recording_finished' if kind == 'success' else 'recording_failed',
+                                         seconds=self.recording_seconds)
                 self.state = 'idle'
                 self.controls(False)
                 self.root.deiconify()
@@ -2256,6 +2434,7 @@ class Recorder:
 
     def destroy(self):
         self.remember_settings()
+        self.telemetry.close()
         self.hotkeys.close()
         if getattr(self, 'editor', None) and not self.editor.closed:
             self.editor.pause_preview()

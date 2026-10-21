@@ -14,6 +14,7 @@ A local Windows desktop screen recorder built with Python and Tkinter. Record a 
 - Diagnostic logs and recovery export for interrupted or failed saves.
 - Standalone Windows EXE packaging with PyInstaller.
 - Saved recording preferences in `%APPDATA%\ClipForge\settings.json`.
+- A one-time first-launch prompt offers **Allow** or **No thanks** for usage statistics. Both answers are remembered; the choice can be changed in More → Privacy & usage statistics. Previously enabled sharing is preserved.
 - Global shortcuts: **Ctrl+Alt+F9** starts recording; **Ctrl+Alt+F10** stops or cancels the countdown. Shortcut conflicts are reported in the status area.
 - Recording requires at least 512 MB free to start and requests an automatic stop below 128 MB. These guards do not guarantee enough space for final export.
 - Cancellable editor exports; completed outputs are preserved when cancelling a split.
@@ -50,6 +51,8 @@ FFmpeg is provided by `imageio-ffmpeg`; a separate FFmpeg installation is not re
 6. Open the recordings folder or **Videos • Crop • Split** to view and edit files.
 
 In the area selector, drag to select an area, drag inside the selection to move it, press Enter to confirm, or Esc to cancel. Closing the app during recording requests a stop and save before exiting.
+
+The area selector opens with a centered selection for the chosen format, ready to confirm or start capturing. **Center area** restores the largest centered selection for that format.
 
 Click **Quality settings…** to change resolution, frame rate, and quality. The home screen shows a compact summary. Changes take effect with **Apply settings**; Cancel leaves the previous values intact.
 
@@ -107,6 +110,8 @@ For microphone access errors, allow desktop apps in Windows microphone privacy s
 Developed by [hichamhr.com](https://hichamhr.com/).
 
 ## Development checks
+
+For local analytics testing, set `API_URL = 'http://localhost:3000/api'` in `clipforge_config.py`, run the Next.js server, and enable **More → Privacy & usage statistics → Share usage statistics** in ClipForge. HTTP is accepted only on loopback addresses. Public builds should use `https://clipforge.hichamhr.com/api`. Rebuild the EXE after changing its configuration, then refresh `/admin` after enabling usage sharing or relaunching the updated app.
 
 Run the settings and export-cancellation checks without accessing recording hardware:
 

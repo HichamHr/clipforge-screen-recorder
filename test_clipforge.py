@@ -11,6 +11,28 @@ import screen_recorder as app
 
 
 class ClipForgeTests(unittest.TestCase):
+    def test_usage_prompt_skipped_after_answer(self):
+        recorder = SimpleNamespace(usage_choice_made=Mock(get=lambda: True))
+        app.Recorder.prompt_usage(recorder)
+
+    def test_allow_usage_remembers_choice_and_enables_analytics(self):
+        recorder = SimpleNamespace(share_usage=Mock(get=lambda: False), usage_choice_made=Mock(),
+                                   telemetry=Mock(), remember_settings=Mock())
+        app.Recorder.apply_usage_choice(recorder, True)
+        recorder.share_usage.set.assert_called_once_with(True)
+        recorder.usage_choice_made.set.assert_called_once_with(True)
+        recorder.telemetry.set_enabled.assert_called_once_with(True)
+        recorder.remember_settings.assert_called_once()
+
+    def test_decline_usage_remembers_choice_without_enabling_analytics(self):
+        recorder = SimpleNamespace(share_usage=Mock(get=lambda: False), usage_choice_made=Mock(),
+                                   telemetry=Mock(), remember_settings=Mock())
+        app.Recorder.apply_usage_choice(recorder, False)
+        recorder.share_usage.set.assert_called_once_with(False)
+        recorder.usage_choice_made.set.assert_called_once_with(True)
+        recorder.telemetry.set_enabled.assert_not_called()
+        recorder.remember_settings.assert_called_once()
+
     def test_global_shortcuts_use_control_alt_and_unregister(self):
         hotkeys = app.RecordingHotkeys.__new__(app.RecordingHotkeys)
         hotkeys.events = queue.Queue()
